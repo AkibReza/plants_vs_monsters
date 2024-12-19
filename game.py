@@ -418,10 +418,10 @@ def draw_plant_pool():
 
 # Waves Configuration
 waves = [
-    {"Zombie": 0, "Zombie2": 0, "Zombie3":0, "speed_multiplier": 1.0},  # Wave 1
-    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "speed_multiplier": 2},  # Wave 2
-    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "speed_multiplier": 2.5},  # Wave 3
-    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "Gargantuar": 5, "speed_multiplier": 1},  # New Wave
+    {"Zombie": 5, "Zombie2": 5, "Zombie3": 10, "speed_multiplier": 1.0},  # Wave 1
+    {"Zombie": 40, "Zombie2": 20, "Zombie3": 10, "speed_multiplier": 2},  # Wave 2
+    {"Zombie": 20, "Zombie2": 50, "Zombie3": 10, "speed_multiplier": 2.5},  # Wave 3
+    {"Zombie": 50, "Zombie2": 20, "Zombie3": 10, "Gargantuar": 5, "speed_multiplier": 1},  # Boss Fight
 ]
 
 
