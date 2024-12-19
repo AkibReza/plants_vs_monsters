@@ -59,16 +59,34 @@ ice_bullet_image = pygame.transform.scale(ice_bullet_image, (50, 50))
 repeater_bullet_image = pygame.image.load("assets/repeater_bullet.png")
 repeater_bullet_image = pygame.transform.scale(repeater_bullet_image, (50, 50))
 
+wallnut_image = pygame.image.load("assets/wallnut.png")
+wallnut_image = pygame.transform.scale(wallnut_image, (CELL_WIDTH - 10, LANE_HEIGHT - 10))
+
+cherry_bomb_image = pygame.image.load("assets/cherry_bomb.png")
+cherry_bomb_image = pygame.transform.scale(cherry_bomb_image, (CELL_WIDTH - 10, LANE_HEIGHT - 10))
+
+shovel_image = pygame.image.load("assets/shovel.png")
+shovel_image = pygame.transform.scale(shovel_image, (CELL_WIDTH - 10, LANE_HEIGHT - 10))
+
+
 # Game objects
 shooter_plants = [[None for _ in range(GRID_COLUMNS)] for _ in range(LANE_COUNT)]
 zombies = []
 bullets = []
+coins = 100
 
 # Drag-and-drop mechanics
 dragging_plant = False
 dragged_plant_pos = None
 plant_type_dragged = None
 
+plant_costs = {
+    "normal_plant": 10,
+    "freezing_plant": 30,
+    "repeater": 30,
+    "wallnut": 25,
+    "cherry_bomb": 50,
+}
 
 
 # Shooter Plant Class
@@ -129,6 +147,51 @@ class Repeater(ShooterPlant):
     def draw(self):
         screen.blit(repeater_image, (self.x + 5, self.y))
 
+# Wallnut Plant Class
+class Wallnut(ShooterPlant):
+    def __init__(self, lane, col):
+        super().__init__(lane, col, health=100
+        )  # High health value
+        self.x = col * CELL_WIDTH
+        self.y = lane * LANE_HEIGHT + 5
+
+    def auto_shoot(self):
+        # Wallnut doesn't shoot, so this method does nothing
+        pass
+
+    def draw(self):
+        # Use a specific sprite for the Wallnut
+        screen.blit(wallnut_image, (self.x + 5, self.y))
+
+# CherryBomb Plant Class
+class CherryBomb(ShooterPlant):
+    def __init__(self, lane, col):
+        super().__init__(lane, col, health=1)  # Minimal health as it explodes quickly
+        self.explode_timer = 60  # Explodes after 1 second (60 frames at 60 FPS)
+
+    def auto_shoot(self):
+        # Countdown to explosion
+        self.explode_timer -= 1
+        if self.explode_timer <= 0:
+            self.explode()  # Trigger the explosion
+
+    def explode(self):
+        # Remove all zombies in a 1-grid radius
+        for zombie in zombies[:]:
+            zombie_col = int(zombie.x // CELL_WIDTH)
+            zombie_lane = zombie.lane
+
+            # Check if the zombie is within 1-grid range (including diagonals)
+            if abs(zombie_col - self.col) <= 1 and abs(zombie_lane - self.lane) <= 1:
+                zombies.remove(zombie)
+
+        # Remove the CherryBomb plant after explosion
+        shooter_plants[self.lane][self.col] = None
+
+    def draw(self):
+        # Use a specific sprite for the CherryBomb
+        screen.blit(cherry_bomb_image, (self.x + 5, self.y))
+
 
 # Bullet Class
 class Bullet:
@@ -161,7 +224,7 @@ class SmallBullet(Bullet):
 
 
 
-
+speed_multiplier = 1.0
 
 # Zombie Class
 class Zombie:
@@ -170,10 +233,12 @@ class Zombie:
         self.x = SCREEN_WIDTH
         self.y = lane * LANE_HEIGHT + 10
         self.health = 5
-        self.speed = 2
+        self.base_speed = 1  # Even slower base speed
+        self.speed = self.base_speed * speed_multiplier
         self.frozen = False
         self.frozen_timer = 0
-        self.eating_plant = None  # Track the plant being eaten
+        self.eating_plant = None
+        self.reward = 10  # Default reward
 
     def move(self):
         if self.eating_plant:  # Stop moving if eating a plant
@@ -181,7 +246,7 @@ class Zombie:
             if self.eating_plant.health <= 0:  # Once the plant is destroyed
                 self.eating_plant = None  # Stop eating
         elif not self.frozen:  # If not frozen or eating, continue moving
-            self.x -= self.speed
+            self.x -= self.speed * speed_multiplier  # Apply speed multiplier
         else:  # Handle frozen timer
             self.frozen_timer += 1
             if self.frozen_timer >= 300:  # 5 seconds freeze (60 FPS * 5)
@@ -208,7 +273,10 @@ class Zombie2(Zombie):
     def __init__(self, lane):
         super().__init__(lane)
         self.health = 10  # Increased health
-        self.speed = 0.5  # Slower speed
+        self.base_speed = 1  # Even slower base speed
+        self.speed = self.base_speed * speed_multiplier
+        self.reward = 20  # Higher reward
+
 
     def draw(self):
         if self.frozen:
@@ -222,7 +290,9 @@ class Zombie3(Zombie):
     def __init__(self, lane):
         super().__init__(lane)
         self.health = 15  # Increased health
-        self.speed = 1  # Slower speed
+        self.base_speed = 1  # Even slower base speed
+        self.speed = self.base_speed * speed_multiplier
+        self.reward = 30  # Highest reward
 
     def draw(self):
         if self.frozen:
@@ -260,30 +330,63 @@ def draw_plant_pool():
     pool_y = LANE_COUNT * LANE_HEIGHT
     screen.fill(WHITE, rect=(0, pool_y, SCREEN_WIDTH, PLANT_POOL_HEIGHT))
 
+    font = pygame.font.Font(None, 24)  # Font for the cost text
+    plant_positions = {}
+
     # Normal plant
-    screen.blit(plant_image, (CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2))
-    pygame.draw.rect(screen, BLACK, (CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT), 2)
+    x, y = CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(plant_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    cost_text = font.render(f"{plant_costs['normal_plant']}", True, BLACK)
+    screen.blit(cost_text, (x + 5, y + LANE_HEIGHT - 20))
+    plant_positions["normal_plant"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
 
     # Freezing plant
-    screen.blit(freezing_plant_image, (3 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2))
-    pygame.draw.rect(screen, BLACK, (3 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT), 2)
+    x, y = 3 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(freezing_plant_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    cost_text = font.render(f"{plant_costs['freezing_plant']}", True, BLACK)
+    screen.blit(cost_text, (x + 5, y + LANE_HEIGHT - 20))
+    plant_positions["freezing_plant"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
 
-    # Small plant
-    screen.blit(repeater_image, (5 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2))
-    pygame.draw.rect(screen, BLACK, (5 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT), 2)
+    # Repeater
+    x, y = 5 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(repeater_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    cost_text = font.render(f"{plant_costs['repeater']}", True, BLACK)
+    screen.blit(cost_text, (x + 5, y + LANE_HEIGHT - 20))
+    plant_positions["repeater"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
 
-    return {
-        "normal_plant": (CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT),
-        "freezing_plant": (3 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT),
-        "repeater": (5 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2, CELL_WIDTH, LANE_HEIGHT),
-    }
+    # Wallnut
+    x, y = 7 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(wallnut_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    cost_text = font.render(f"{plant_costs['wallnut']}", True, BLACK)
+    screen.blit(cost_text, (x + 5, y + LANE_HEIGHT - 20))
+    plant_positions["wallnut"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
+
+    # Cherry Bomb
+    x, y = 9 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(cherry_bomb_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    cost_text = font.render(f"{plant_costs['cherry_bomb']}", True, BLACK)
+    screen.blit(cost_text, (x + 5, y + LANE_HEIGHT - 20))
+    plant_positions["cherry_bomb"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
+
+    # Shovel (no cost required)
+    x, y = 11 * CELL_WIDTH // 2, pool_y + (PLANT_POOL_HEIGHT - LANE_HEIGHT) // 2
+    screen.blit(shovel_image, (x, y))
+    pygame.draw.rect(screen, BLACK, (x, y, CELL_WIDTH, LANE_HEIGHT), 2)
+    plant_positions["shovel"] = (x, y, CELL_WIDTH, LANE_HEIGHT)
+
+    return plant_positions
 
 
 # Waves Configuration
 waves = [
     {"Zombie": 10, "Zombie2": 10, "Zombie3": 5},  # Wave 1
-    {"Zombie": 0, "Zombie2": 0, "Zombie3": 20},  # Wave 2
-    {"Zombie": 0, "Zombie2": 20, "Zombie3": 0},  # Wave 3
+    {"Zombie": 10, "Zombie2": 0, "Zombie3": 90},  # Wave 2
+    {"Zombie": 20, "Zombie2": 50, "Zombie3": 50},  # Wave 3
     # Add more waves here as needed
 ]
 current_wave = 0
@@ -294,7 +397,7 @@ SPAWN_INTERVAL = 30  # Spawn a zombie every 1 second (60 FPS)
 
 # Spawn zombies based on wave configuration
 def spawn_zombies():
-    global wave_zombies_remaining, current_wave, spawn_timer
+    global wave_zombies_remaining, current_wave, spawn_timer,speed_multiplier
     spawn_timer += 1
     if spawn_timer >= SPAWN_INTERVAL and wave_zombies_remaining > 0:
         zombie_type = random.choices(
@@ -318,15 +421,22 @@ def spawn_zombies():
             wave_zombies_remaining -= 1
             spawn_timer = 0  # Reset timer after spawning
 
+# Update zombie speeds when transitioning waves
+def update_zombie_speeds():
+    for zombie in zombies:
+        zombie.speed = zombie.base_speed * speed_multiplier
+
 
 # Check wave completion and transition
 
 def check_wave_completion():
-    global current_wave, wave_zombies_remaining
+    global current_wave, wave_zombies_remaining, speed_multiplier
     if wave_zombies_remaining == 0 and not zombies:
         current_wave += 1
         if current_wave < len(waves):
             wave_zombies_remaining = sum(waves[current_wave].values())
+            speed_multiplier += 0.2  # Increase zombie speed by 20% per wave
+            update_zombie_speeds()
         else:
             print("You Win!")
             pygame.quit()
@@ -337,12 +447,17 @@ def draw_wave_info():
     font = pygame.font.Font(None, 36)
     wave_text = font.render(f"Wave: {current_wave + 1}", True, BLACK)
     zombies_text = font.render(f"Zombies Left: {len(zombies) + wave_zombies_remaining}", True, BLACK)
-    screen.blit(wave_text, (10, SCREEN_HEIGHT - 40))
-    screen.blit(zombies_text, (200, SCREEN_HEIGHT - 40))
+    coins_text = font.render(f"Coins: {coins}", True, BLACK)  # Display coins
+    speed_text = font.render(f"Speed Multiplier: {speed_multiplier:.1f}x", True, BLACK)  # Display multiplier
+    screen.blit(wave_text, (10, SCREEN_HEIGHT - 80))
+    screen.blit(zombies_text, (200, SCREEN_HEIGHT - 80))
+    screen.blit(coins_text, (500, SCREEN_HEIGHT - 80))
+    screen.blit(speed_text, (700, SCREEN_HEIGHT - 80))
+
 
 # Main game loop
 def main():
-    global dragging_plant, dragged_plant_pos, plant_type_dragged
+    global dragging_plant, dragged_plant_pos, plant_type_dragged, coins
 
     while True:
         for event in pygame.event.get():
@@ -350,31 +465,52 @@ def main():
                 pygame.quit()
                 sys.exit()
 
-            # Start dragging a plant
+            # Start dragging a plant or tool
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mx, my = pygame.mouse.get_pos()
                 plant_pool_positions = draw_plant_pool()
 
-                # Check which plant is being dragged
+                # Check which plant/tool is being dragged
                 for plant_type, (x, y, w, h) in plant_pool_positions.items():
                     if x <= mx <= x + w and y <= my <= y + h:
                         dragging_plant = True
                         dragged_plant_pos = (mx, my)
                         plant_type_dragged = plant_type
 
-            # Drop the plant onto the grid
+            # Drop the plant/tool onto the grid
             if event.type == pygame.MOUSEBUTTONUP and dragging_plant:
                 mx, my = pygame.mouse.get_pos()
                 lane = my // LANE_HEIGHT
                 col = mx // CELL_WIDTH
-                if 0 <= lane < LANE_COUNT and 0 <= col < GRID_COLUMNS and not shooter_plants[lane][col]:
-                    if plant_type_dragged == "normal_plant":
-                        shooter_plants[lane][col] = ShooterPlant(lane, col)
-                    elif plant_type_dragged == "freezing_plant":
-                        shooter_plants[lane][col] = FreezingPlant(lane, col)
-                    elif plant_type_dragged == "repeater":
-                        shooter_plants[lane][col] = Repeater(lane, col)
+
+                if plant_type_dragged == "shovel":
+                    # Remove plant if shovel is used
+                    if 0 <= lane < LANE_COUNT and 0 <= col < GRID_COLUMNS and shooter_plants[lane][col]:
+                        shooter_plants[lane][col] = None
+                elif plant_type_dragged in plant_costs:  # Ensure it's a plant, not a shovel
+                    if coins >= plant_costs[plant_type_dragged]:  # Check if player has enough coins
+                        if 0 <= lane < LANE_COUNT and 0 <= col < GRID_COLUMNS and not shooter_plants[lane][col]:
+                            if plant_type_dragged == "normal_plant":
+                                shooter_plants[lane][col] = ShooterPlant(lane, col)
+                            elif plant_type_dragged == "freezing_plant":
+                                shooter_plants[lane][col] = FreezingPlant(lane, col)
+                            elif plant_type_dragged == "repeater":
+                                shooter_plants[lane][col] = Repeater(lane, col)
+                            elif plant_type_dragged == "wallnut":
+                                shooter_plants[lane][col] = Wallnut(lane, col)
+                            elif plant_type_dragged == "cherry_bomb":
+                                shooter_plants[lane][col] = CherryBomb(lane, col)
+
+                            # Deduct coins
+                            coins -= plant_costs[plant_type_dragged]
+                    else:
+                        font = pygame.font.Font(None, 36)
+                        warning_text = font.render("Not enough coins!", True, RED)
+                        screen.blit(warning_text, (SCREEN_WIDTH // 2 - 100, SCREEN_HEIGHT - 50))
+
+                # Reset dragging state
                 dragging_plant = False
+                plant_type_dragged = None
 
         # Draw the game elements
         draw_background()
@@ -382,10 +518,10 @@ def main():
         # Draw plant pool
         draw_plant_pool()
 
-        # Draw wave and zombie information
+        # Draw wave, zombie, and coin information
         draw_wave_info()
 
-        # Draw dragged plant
+        # Draw the dragged plant/tool following the mouse cursor
         if dragging_plant:
             mx, my = pygame.mouse.get_pos()
             if plant_type_dragged == "normal_plant":
@@ -394,6 +530,12 @@ def main():
                 screen.blit(freezing_plant_image, (mx - CELL_WIDTH // 2, my - LANE_HEIGHT // 2))
             elif plant_type_dragged == "repeater":
                 screen.blit(repeater_image, (mx - CELL_WIDTH // 2, my - LANE_HEIGHT // 2))
+            elif plant_type_dragged == "wallnut":
+                screen.blit(wallnut_image, (mx - CELL_WIDTH // 2, my - LANE_HEIGHT // 2))
+            elif plant_type_dragged == "cherry_bomb":
+                screen.blit(cherry_bomb_image, (mx - CELL_WIDTH // 2, my - LANE_HEIGHT // 2))
+            elif plant_type_dragged == "shovel":
+                screen.blit(shovel_image, (mx - CELL_WIDTH // 2, my - LANE_HEIGHT // 2))
 
         # Update and draw shooter plants
         for lane in shooter_plants:
@@ -425,6 +567,7 @@ def main():
                         zombie.health -= getattr(bullet, 'damage', 1)  # Default damage is 1
                     bullets.remove(bullet)
                     if zombie.health <= 0:
+                        coins += zombie.reward  # Add coins based on zombie reward
                         zombies.remove(zombie)
                         break
 
