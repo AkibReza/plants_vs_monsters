@@ -47,6 +47,9 @@ zombie_2_image = pygame.transform.scale(zombie_2_image, (CELL_WIDTH - 30, LANE_H
 zombie_3_image = pygame.image.load("assets/zombie_3.png")
 zombie_3_image = pygame.transform.scale(zombie_3_image, (CELL_WIDTH - 30, LANE_HEIGHT - 20))
 
+gargantuar_image = pygame.image.load("assets/gargantuar.png")
+gargantuar_image = pygame.transform.scale(gargantuar_image, (CELL_WIDTH + 50, LANE_HEIGHT + 50))
+
 freezed_zombie_image = pygame.image.load("assets/freezed_zombie.png")
 freezed_zombie_image = pygame.transform.scale(freezed_zombie_image, (CELL_WIDTH - 30, LANE_HEIGHT - 20))
 
@@ -73,7 +76,7 @@ shovel_image = pygame.transform.scale(shovel_image, (CELL_WIDTH - 10, LANE_HEIGH
 shooter_plants = [[None for _ in range(GRID_COLUMNS)] for _ in range(LANE_COUNT)]
 zombies = []
 bullets = []
-coins = 100
+coins = 10000
 
 # Drag-and-drop mechanics
 dragging_plant = False
@@ -83,7 +86,7 @@ plant_type_dragged = None
 plant_costs = {
     "normal_plant": 10,
     "freezing_plant": 30,
-    "repeater": 30,
+    "repeater": 100,
     "wallnut": 25,
     "cherry_bomb": 50,
 }
@@ -91,20 +94,20 @@ plant_costs = {
 
 # Shooter Plant Class
 class ShooterPlant:
-    def __init__(self, lane, col,health=5):
+    def __init__(self, lane, col,health=5,attack_power=1):
         self.lane = lane
         self.col = col
         self.x = col * CELL_WIDTH
         self.y = lane * LANE_HEIGHT + 5
         self.shoot_timer = 0
         self.health = health
-
+        self.attack_power = attack_power
     def auto_shoot(self):
         self.shoot_timer += 1
         if self.shoot_timer >= 90:  # Shoot every 1.5 seconds
             for zombie in zombies:
                 if zombie.lane == self.lane:
-                    bullets.append(Bullet(self.x + CELL_WIDTH, self.y + LANE_HEIGHT // 2 - 5))
+                    bullets.append(Bullet(self.x + CELL_WIDTH, self.y + LANE_HEIGHT // 2 - 5, damage=self.attack_power))
                     self.shoot_timer = 0
                     break
     def take_damage(self, damage):
@@ -168,6 +171,7 @@ class CherryBomb(ShooterPlant):
     def __init__(self, lane, col):
         super().__init__(lane, col, health=1)  # Minimal health as it explodes quickly
         self.explode_timer = 60  # Explodes after 1 second (60 frames at 60 FPS)
+        self.damage = 30  # Amount of damage dealt by the explosion
 
     def auto_shoot(self):
         # Countdown to explosion
@@ -176,14 +180,16 @@ class CherryBomb(ShooterPlant):
             self.explode()  # Trigger the explosion
 
     def explode(self):
-        # Remove all zombies in a 1-grid radius
+        # Apply damage to all zombies in a 1-grid radius
         for zombie in zombies[:]:
             zombie_col = int(zombie.x // CELL_WIDTH)
             zombie_lane = zombie.lane
 
             # Check if the zombie is within 1-grid range (including diagonals)
             if abs(zombie_col - self.col) <= 1 and abs(zombie_lane - self.lane) <= 1:
-                zombies.remove(zombie)
+                zombie.health -= self.damage  # Reduce zombie's health
+                if zombie.health <= 0:  # Remove zombie if its health drops to 0 or below
+                    zombies.remove(zombie)
 
         # Remove the CherryBomb plant after explosion
         shooter_plants[self.lane][self.col] = None
@@ -193,12 +199,15 @@ class CherryBomb(ShooterPlant):
         screen.blit(cherry_bomb_image, (self.x + 5, self.y))
 
 
+
+# Bullet Class
 # Bullet Class
 class Bullet:
-    def __init__(self, x, y):
+    def __init__(self, x, y, damage=1):  # Default damage is 1
         self.x = x
         self.y = y
         self.speed = 10
+        self.damage = damage  # Store damage for the bullet
 
     def move(self):
         self.x += self.speed
@@ -209,18 +218,20 @@ class Bullet:
 
 # Ice Bullet Class
 class IceBullet(Bullet):
+    def __init__(self, x, y):
+        super().__init__(x, y, damage=1)  # IceBullet deals 1 damage by default
+
     def draw(self):
         screen.blit(ice_bullet_image, (self.x, self.y))
 
-
-# Small Bullet Class
+# Small Bullet Class (used by Repeater)
 class SmallBullet(Bullet):
     def __init__(self, x, y):
-        super().__init__(x, y)
-        self.damage = 2  # Twice the damage of normal bullets
+        super().__init__(x, y, damage=2)  # SmallBullet deals 2 damage
 
     def draw(self):
         screen.blit(repeater_bullet_image, (self.x, self.y))
+
 
 
 
@@ -299,6 +310,29 @@ class Zombie3(Zombie):
             screen.blit(freezed_zombie_image, (self.x, self.y))
         else:
             screen.blit(zombie_3_image, (self.x, self.y))
+
+
+# Gargantuar Zombie Class
+# Gargantuar Zombie Class
+class Gargantuar(Zombie):
+    def __init__(self, lane):
+        super().__init__(lane)
+        self.health = 300  # Massive health
+        self.base_speed = 0.5  # Very slow speed
+        self.speed = self.base_speed * speed_multiplier
+        self.reward = 50  # High reward for defeating
+
+    def move(self):
+        if self.eating_plant:  # Stop moving if eating a plant
+            self.eating_plant.take_damage(0.2)  # Deal more damage to plants
+            if self.eating_plant.health <= 0:  # Once the plant is destroyed
+                self.eating_plant = None  # Stop eating
+        else:  # Move normally, ignoring freezing
+            self.x -= self.speed * speed_multiplier
+
+    def draw(self):
+        # Use the correct sprite for the Gargantuar
+        screen.blit(gargantuar_image, (self.x, self.y))  # Replace with Gargantuar sprite
 
 
 # Check for losing condition
@@ -384,28 +418,31 @@ def draw_plant_pool():
 
 # Waves Configuration
 waves = [
-    {"Zombie": 10, "Zombie2": 10, "Zombie3": 5},  # Wave 1
-    {"Zombie": 10, "Zombie2": 0, "Zombie3": 90},  # Wave 2
-    {"Zombie": 20, "Zombie2": 50, "Zombie3": 50},  # Wave 3
-    # Add more waves here as needed
+    {"Zombie": 0, "Zombie2": 0, "Zombie3":0, "speed_multiplier": 1.0},  # Wave 1
+    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "speed_multiplier": 2},  # Wave 2
+    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "speed_multiplier": 2.5},  # Wave 3
+    {"Zombie": 0, "Zombie2": 0, "Zombie3": 0, "Gargantuar": 5, "speed_multiplier": 1},  # New Wave
 ]
+
+
 current_wave = 0
-wave_zombies_remaining = sum(waves[current_wave].values())
+wave_zombies_remaining = sum(value for key, value in waves[current_wave].items() if key != "speed_multiplier")
 
 spawn_timer = 0
 SPAWN_INTERVAL = 30  # Spawn a zombie every 1 second (60 FPS)
 
 # Spawn zombies based on wave configuration
 def spawn_zombies():
-    global wave_zombies_remaining, current_wave, spawn_timer,speed_multiplier
+    global wave_zombies_remaining, current_wave, spawn_timer, speed_multiplier
     spawn_timer += 1
     if spawn_timer >= SPAWN_INTERVAL and wave_zombies_remaining > 0:
         zombie_type = random.choices(
-            ["Zombie", "Zombie2", "Zombie3"],
+            ["Zombie", "Zombie2", "Zombie3", "Gargantuar"],
             weights=[
                 waves[current_wave].get("Zombie", 0),
                 waves[current_wave].get("Zombie2", 0),
                 waves[current_wave].get("Zombie3", 0),
+                waves[current_wave].get("Gargantuar", 0),
             ],
             k=1,
         )[0]
@@ -417,9 +454,12 @@ def spawn_zombies():
                 zombies.append(Zombie2(lane))
             elif zombie_type == "Zombie3":
                 zombies.append(Zombie3(lane))
+            elif zombie_type == "Gargantuar":
+                zombies.append(Gargantuar(lane))
             waves[current_wave][zombie_type] -= 1
             wave_zombies_remaining -= 1
             spawn_timer = 0  # Reset timer after spawning
+
 
 # Update zombie speeds when transitioning waves
 def update_zombie_speeds():
@@ -434,13 +474,17 @@ def check_wave_completion():
     if wave_zombies_remaining == 0 and not zombies:
         current_wave += 1
         if current_wave < len(waves):
-            wave_zombies_remaining = sum(waves[current_wave].values())
-            speed_multiplier += 0.2  # Increase zombie speed by 20% per wave
+            wave_zombies_remaining = sum(
+                value for key, value in waves[current_wave].items() if key != "speed_multiplier"
+            )
+            speed_multiplier = waves[current_wave]["speed_multiplier"]  # Use fixed multiplier
             update_zombie_speeds()
         else:
             print("You Win!")
             pygame.quit()
             sys.exit()
+
+
 
 # Draw wave and zombie information
 def draw_wave_info():
